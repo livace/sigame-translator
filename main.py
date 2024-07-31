@@ -10,24 +10,9 @@ import tqdm
 
 import tempfile
 
+
 def walk(root, result):
-    def should_skip(root):
-        if not root.text:
-            return True
-
-        if root.text.startswith('@'):
-            return True
-
-        if root.attrib and 'isRef' in root.attrib and root.attrib['isRef']:
-            return True
-
-        if set('абвгдеёжзийклмнопрстуфхцчшщъыьэюя').isdisjoint(root.text.lower()):
-            return True
-
-        return False
-
-    if not should_skip(root):
-        result.append(root)
+    result.append(root)
 
     for children in root:
         walk(children, result)
@@ -58,6 +43,39 @@ def collect_nodes(root):
     walk(root, result)
     return result
 
+
+def collect_texts(nodes):
+    result = []
+
+    def add_if_should_translate(text):
+        if not set('абвгдеёжзийклмнопрстуфхцчшщъыьэюя').isdisjoint(text.lower()):
+            result.append(text)
+
+    def add_text_if_should(node):
+        if not node.text:
+            return
+
+        if node.text.startswith('@'):
+            return
+
+        if node.attrib and 'isRef' in node.attrib and node.attrib['isRef']:
+            return
+
+        add_if_should_translate(node.text)
+
+    def add_name_if_should(node):
+        if not node.attrib:
+            return
+        if 'name' not in node.attrib:
+            return
+        add_if_should_translate(node.attrib['name'])
+
+    for node in nodes:
+        add_text_if_should(node)
+        add_name_if_should(node)
+
+    return list(reversed(sorted(result, key=len)))
+
 def update(dir):
     fname = f'{dir}/content.xml'
     tree_text = open(fname, 'r').read().replace('\n', '  ')
@@ -66,20 +84,25 @@ def update(dir):
 
     nodes = collect_nodes(root)
 
-    texts = list(map(lambda x: x.text, nodes))
+    texts = collect_texts(nodes)
+
+    for text in texts:
+        print(f'Will translate {text}')
 
     translated = translate(texts)
 
-    for node, text in zip(nodes, translated):
-        print(tree_text)
-        # print(f'{node.text} -> {text}')
-        tree_text = tree_text.replace(node.text, text)
+    for replace_from, replace_to in zip(texts, translated):
+        print(f'Translated {replace_from} -> {replace_to}')
+        tree_text = tree_text.replace(replace_from, replace_to)
 
+    print(tree_text)
     open(fname, 'w').write(tree_text)
+
 
 def unzip_to(file, dir):
     with zipfile.ZipFile(file, 'r') as zip_ref:
         zip_ref.extractall(dir)
+
 
 def zip_back(file, dir):
     try:
@@ -95,7 +118,6 @@ def zip_back(file, dir):
 
     with zipfile.ZipFile(file, 'w') as zip_ref:
         zipdir(dir, zip_ref)
-
 
 
 def main():

@@ -22,7 +22,7 @@ def translate(texts):
     translator = Translator()
 
     result = []
-    bs = 25
+    bs = 10
     for i in tqdm.tqdm(range(0, len(texts), bs)):
         result += translator.translate('\n'.join(texts[i:i+bs]), dest='en').text.split('\n')
         time.sleep(0.1)

@@ -1,14 +1,25 @@
-import zipfile
-
+#!/usr/bin/env python3
+import argparse
+import logging
 import os
 import sys
+import tempfile
+import time
+import tqdm
+import zipfile
+
 import xml.etree.ElementTree as ET
 
 from googletrans import Translator
-import time
-import tqdm
 
-import tempfile
+
+def parse_args():
+    parser = argparse.ArgumentParser('Epic sigame pack translator')
+    parser.add_argument('input_file', help='Pack to be translated')
+    parser.add_argument('--output', '-o', help='Output file')
+    parser.add_argument('--verbose', '-v', action='store_true', default=False, help='Verbose output (spoiler alert)')
+    parser.add_argument('--batch-size', '-b', type=int, default=10, help='Batch size')
+    return parser.parse_args()
 
 
 def walk(root, result):
@@ -18,11 +29,10 @@ def walk(root, result):
         walk(children, result)
 
 
-def translate(texts):
+def translate(texts, bs):
     translator = Translator()
 
     result = []
-    bs = 10
     for i in tqdm.tqdm(range(0, len(texts), bs)):
         result += translator.translate('\n'.join(texts[i:i+bs]), dest='en').text.split('\n')
         time.sleep(0.1)
@@ -31,7 +41,7 @@ def translate(texts):
         for i in range(max(len(texts), len(result))):
             f = texts[i] if i < len(texts) else '[none]'
             t = result[i] if i < len(result) else '[none]'
-            print(f'{f} -> {t}')
+            logging.debug(f'{f} -> {t}')
 
         assert len(texts) == len(result), f'Expected: {len(result)}, got: {len(texts)}'
 
@@ -76,26 +86,26 @@ def collect_texts(nodes):
 
     return list(reversed(sorted(result, key=len)))
 
-def update(dir):
+def update(dir, bs):
     fname = f'{dir}/content.xml'
     tree_text = open(fname, 'r').read().replace('\n', '  ')
     root = ET.fromstring(tree_text)
-    print(tree_text)
+    logging.debug(tree_text)
 
     nodes = collect_nodes(root)
 
     texts = collect_texts(nodes)
 
     for text in texts:
-        print(f'Will translate {text}')
+        logging.debug(f'Will translate {text}')
 
-    translated = translate(texts)
+    translated = translate(texts, bs)
 
     for replace_from, replace_to in zip(texts, translated):
-        print(f'Translated {replace_from} -> {replace_to}')
+        logging.debug(f'Translated {replace_from} -> {replace_to}')
         tree_text = tree_text.replace(replace_from, replace_to)
 
-    print(tree_text)
+    logging.debug(tree_text)
     open(fname, 'w').write(tree_text)
 
 
@@ -121,13 +131,22 @@ def zip_back(file, dir):
 
 
 def main():
-    archive = sys.argv[1]
-    dest = f'{archive}.translation.siq'
+    args = parse_args()
+    logging.basicConfig(
+        format='%(asctime)s [%(levelname)s] %(message)s',
+        datefmt='%Y-%m-%dT%H:%M:%S',
+        level=logging.INFO if not args.verbose else logging.DEBUG,
+    )
+
+    archive = args.input_file
+    dest = f'{archive}.translation.siq' if args.output is None else args.output
+    logging.info('Destination file: %s', dest)
+    logging.info('Batch size: %s', args.batch_size)
 
     with tempfile.TemporaryDirectory() as dir:
-        print(f'Unzip to: {dir}')
+        logging.info(f'Unzip to: {dir}')
         unzip_to(archive, dir)
-        update(dir)
+        update(dir, args.batch_size)
         zip_back(dest, dir)
 
 

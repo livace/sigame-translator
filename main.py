@@ -7,6 +7,7 @@ import tempfile
 import time
 import tqdm
 import zipfile
+import subprocess
 
 import xml.etree.ElementTree as ET
 
@@ -54,6 +55,19 @@ def collect_nodes(root):
     return result
 
 
+def is_text_node(node):
+    if not node.text:
+        return False
+
+    if node.text.startswith('@'):
+        return False
+
+    if node.attrib and 'isRef' in node.attrib and node.attrib['isRef']:
+        return False
+
+    return True
+
+
 def collect_texts(nodes):
     result = []
 
@@ -62,16 +76,8 @@ def collect_texts(nodes):
             result.append(text)
 
     def add_text_if_should(node):
-        if not node.text:
-            return
-
-        if node.text.startswith('@'):
-            return
-
-        if node.attrib and 'isRef' in node.attrib and node.attrib['isRef']:
-            return
-
-        add_if_should_translate(node.text)
+        if is_text_node(node):
+            add_if_should_translate(node.text)
 
     def add_name_if_should(node):
         if not node.attrib:
@@ -86,10 +92,24 @@ def collect_texts(nodes):
 
     return list(reversed(sorted(result, key=len)))
 
+
+def replace_texts(root, trans_dict):
+    if is_text_node(root):
+        if root.text in trans_dict:
+            root.text = trans_dict[root.text]
+    for key in root.attrib:
+        logging.debug('Attrib: %s -> %s', key, root.attrib[key])
+        if root.attrib[key] in trans_dict:
+            root.attrib[key] = trans_dict[root.attrib[key]]
+    for child in root:
+        replace_texts(child, trans_dict)
+
+
 def update(dir, bs):
     fname = f'{dir}/content.xml'
     tree_text = open(fname, 'r').read().replace('\n', '  ')
     root = ET.fromstring(tree_text)
+
     logging.debug(tree_text)
 
     nodes = collect_nodes(root)
@@ -101,17 +121,24 @@ def update(dir, bs):
 
     translated = translate(texts, bs)
 
-    for replace_from, replace_to in zip(texts, translated):
-        logging.debug(f'Translated {replace_from} -> {replace_to}')
-        tree_text = tree_text.replace(replace_from, replace_to)
+    trans_dict = dict(zip(texts, translated))
 
+    for k, v in trans_dict.items():
+        logging.debug('Translation: %s -> %s', k, v)
+
+    replace_texts(root, trans_dict)
+    tree_text = ET.tostring(root, encoding='unicode')
     logging.debug(tree_text)
     open(fname, 'w').write(tree_text)
 
 
 def unzip_to(file, dir):
-    with zipfile.ZipFile(file, 'r') as zip_ref:
-        zip_ref.extractall(dir)
+    logging.info(f'Unzip {file} to: {dir}')
+    subprocess.run(
+        ['unzip', file, '-d', dir],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.STDOUT,
+    )
 
 
 def zip_back(file, dir):
@@ -144,7 +171,6 @@ def main():
     logging.info('Batch size: %s', args.batch_size)
 
     with tempfile.TemporaryDirectory() as dir:
-        logging.info(f'Unzip to: {dir}')
         unzip_to(archive, dir)
         update(dir, args.batch_size)
         zip_back(dest, dir)
